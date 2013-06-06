@@ -1397,8 +1397,28 @@ class LinterPluginTest extends JUnitMustMatchers with StandardMatchResults {
     shouldnt("""class a { sealed trait Hello; sealed trait Hello2 extends Hello; object a { val b = "fdsfds"; class s() extends Hello2; } }""")
   }
 
+  @Test 
+  def option__newbieChecks() {
+    
+    should("""var a: String = null; if(a+"" == null) None else Some(a+"")""")("""Use Option(...), which automatically wraps null to None""")
+    shouldnt("""var a: String = null; if(a == null) None else Some(a+"")""")("""Use Option(...), which automatically wraps null to None""")
+    should("""var a: String = null; if(a+"" != null) Some(a+"") else None""")("""Use Option(...), which automatically wraps null to None""")
+    shouldnt("""var a: String = null; if(a != null) Some(a+"") else None""")("""Use Option(...), which automatically wraps null to None""")
+    
+    should("""def a: Option[Int] = null""")("""You probably meant None, not null.""")
+    should("""val a: Option[Int] = null""")("""You probably meant None, not null.""")
+    should("""var a: Option[Int] = Some(6); println("Foo"); a = null""")("""You probably meant None, not null.""")
 
-  
+  }
+
+  @Test 
+  def random__checks() {
+    should("""util.Random.nextInt(-1)""")("""The parameter of this nextInt might be lower than 1 here.""")
+    shouldnt("""util.Random.nextInt(1)""")("""The parameter of this nextInt might be lower than 1 here.""")
+    should("""var a = new util.Random; a.nextInt(-1)""")("""The parameter of this nextInt might be lower than 1 here.""")
+    shouldnt("""var a = new util.Random; a.nextInt(1)""")("""The parameter of this nextInt might be lower than 1 here.""")
+  }
+    
   //stuff that doesn't work and I don't know why
   @Test 
   def broken() {

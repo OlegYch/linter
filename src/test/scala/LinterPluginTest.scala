@@ -52,7 +52,7 @@ class LinterPluginTest extends JUnitMustMatchers with StandardMatchResults {
         val compiler = super.newCompiler(settings, reporter)
         val linterPlugin = new LinterPlugin(compiler)
         for (phase <- linterPlugin.components)
-          compiler.asInstanceOf[ {def phasesSet: mutable.HashSet[tools.nsc.SubComponent]}].phasesSet += phase
+          compiler.asInstanceOf[{def phasesSet: mutable.HashSet[tools.nsc.SubComponent]}].phasesSet += phase
         compiler
       }
     }
@@ -253,6 +253,18 @@ class LinterPluginTest extends JUnitMustMatchers with StandardMatchResults {
   }
   
   @Test
+  def case__unreachable() {
+    implicit val msg = "Identical case detected above - this will never match."
+    
+    should("""val a = 5; a match { case a if a == 5 => "f" case a if a == 5 => "d" }""")
+    shouldnt("""val a = 5; a match { case a if a == 6 => "f" case a if a == 5 => "d" }""")
+    
+    should("""val x = 5; (x,8) match { case (a,8) if a == 5 => "f" case (b,8) if b == 5 => "d" }""")
+    shouldnt("""val x = 5; (x,8) match { case (a,8) if a == 5 => "f" case (b,8) if b == 6 => "d" }""")
+    shouldnt("""val x = 5; (x,8) match { case (a,8) if a == 5 => "f" case (b,7) if b == 6 => "d" }""")
+  }
+  
+  @Test
   def case__constantValue() {
     implicit val msg = "Pattern matching on a constant value"
     
@@ -332,8 +344,8 @@ class LinterPluginTest extends JUnitMustMatchers with StandardMatchResults {
   def def__redundantParameters() {
     implicit val msg = "not used in method"
     
-    should("""def func(a:Int, b:Int) = a""")
-    should("""def func(a:Int)(implicit b:Int) = b""")
+    should("""def func(a:Int, b:Int) = { val c = a+1; c } """)
+    should("""def func(a:Int)(implicit b:Int) = { val c = b+1; b }""")
     
     shouldnt("""def func(a:Int)(implicit b:Int) = a""")
     shouldnt("""def func(a:Int) = a""")
@@ -543,9 +555,13 @@ class LinterPluginTest extends JUnitMustMatchers with StandardMatchResults {
   
     implicit var msg = "Did you mean to take the size of the collection inside the Option?"
     should("""Option(List(2)).size""")
-    should("""Option("fdsfd").size""")
     should("""List(List(2)).headOption.size""")
     shouldnt("""List(2).headOption.size""")
+    msg = "Did you mean to take the size of the string inside the Option?"
+    should("""Option("fdsfd").size""")
+    msg = "Using Option.size is not recommended, use Option.isDefined instead"
+    should("""val a = Option(4).size""")
+    should("""List(2).headOption.size""")
     
     msg = "Option of an Option"
     should("""val a = Option(Option("fdsfs"))""")
@@ -631,7 +647,7 @@ class LinterPluginTest extends JUnitMustMatchers with StandardMatchResults {
   
   @Test
   def regex__syntaxErrors() {
-    implicit val msg = "Regex pattern syntax warning"
+    implicit val msg = "Regex pattern syntax error"
     
     should("""
       "*+".r
@@ -819,7 +835,7 @@ class LinterPluginTest extends JUnitMustMatchers with StandardMatchResults {
 
   @Test
   def probableBugs__sameElseIfCondition() {
-    implicit val msg = "else-if has the same condition"
+    implicit val msg = "This condition has appeared earlier in the if-else chain, and will never hold here."
 
     should("""
       var a = "b"+util.Random.nextInt
@@ -1053,43 +1069,57 @@ class LinterPluginTest extends JUnitMustMatchers with StandardMatchResults {
   }
 
   @Test
+  def possibleBugs__anynothing() {
+    implicit val msg = "Inferred type"//Any/Nothing. This might not be what you intended."
+    
+    should("""{ var a = if(3 == 3) 5 else ""; println(a) }""")
+    shouldnt("""{ var a:Any = if(3 == 3) 5 else ""; println(a) }""")
+    
+    should("""{ var a = List(if(3 == 3) 5 else ""); println(a) }""")
+    shouldnt("""{ var a:List[Any] = List(if(3 == 3) 5 else ""); println(a) }""")
+
+    should("""{ var a = if(3 == 3) throw new Exception() else throw new Error(); println(a) }""")
+    shouldnt("""{ var a:Nothing = if(3 == 3) throw new Exception() else throw new Error(); println(a) }""")
+    
+    should("""{ var a = List(if(3 == 3) throw new Exception() else throw new Error()); println(a) }""")
+    shouldnt("""{ var a:List[Nothing] = List(if(3 == 3) throw new Exception() else throw new Error()); println(a) }""")
+  }
+  
+  @Test
   def possibleBugs__assignment() {
-    implicit val msg = "Assignment right after declaration"
+    implicit val msg = "unused value before"//"Assignment right after declaration"
     
     should("""
-      var a = 6
+      var a = 6L
       a = 3
     """)
-    //TODO:
-    /*should("""
-      var a = 6
+    should("""
+      var a = 6L
       println("foo")
       a = 3
-    """)*/
+    """)
 
-    // Most of the real-world cases are like this - use var to compute new value
     shouldnt("""
       var a = "A6"
       a = a.toLowerCase
     """)
     shouldnt("""
-      var a = 6
+      var a = 6L
       a += 3
     """)
   }
 
   @Test
   def possibleBugs__assignment2() {
-    implicit val msg = "Two subsequent assigns"
+    implicit val msg = "unused value before"//"Two subsequent assigns"
     
     should("""
-      var a = 6
+      var a = 6L
       println(a)
       a = 4
       a = 3
     """)
 
-    // Most of the real-world cases are like this - use var to compute new value
     // If fails, look at isUsed first
     shouldnt("""
       var a = "A6"
@@ -1326,7 +1356,7 @@ class LinterPluginTest extends JUnitMustMatchers with StandardMatchResults {
 
   @Test
   def style__flatMap_to_filter() {
-    implicit val msg = /*filter*/"instead of this flatMap"
+    implicit val msg = /*filter*/"instead of flatMap"
     
     should(""" List(1,2,3).flatMap(x => if(x == 2) Some(x) else None) """)
     should(""" List(1,2,3).flatMap(x => if(x == 2) Nil else List(x)) """)
@@ -1391,10 +1421,14 @@ class LinterPluginTest extends JUnitMustMatchers with StandardMatchResults {
     implicit val msg = "This sealed trait is never"
     
     should("""sealed trait Hello""")
+    should("""sealed trait Hello { def a = println("hello") }""")
     should("""class a { sealed trait Hello; object a { val b = "fdsfds"; class s(); } }""")
     should("""class a { sealed trait Hello; sealed trait Hello2 extends Hello; object a { val b = "fdsfds"; class s(); } }""")
     should("""class a { sealed trait Hello; sealed trait Hello2 extends Hello; object a { val b = "fdsfds"; class s() extends Hello; } }""")
     shouldnt("""class a { sealed trait Hello; sealed trait Hello2 extends Hello; object a { val b = "fdsfds"; class s() extends Hello2; } }""")
+
+    shouldnt("""sealed trait Hello { def a = println("hello") }; val b = new Hello {}""")
+    shouldnt("""sealed trait Hello[A, B <: List]""")
   }
 
   @Test 

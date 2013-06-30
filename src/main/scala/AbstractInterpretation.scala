@@ -19,6 +19,7 @@ class AbstractInterpretation(val global: Global, implicit val unit: GUnit) {
 
     for(Ident(id) <- tree; if id.toString == name) used += 1
     //TODO: Only for select types, also, maybe this doesn't belong in all uses of isUsed (e.g. Assignment right after declaration)
+    // isSideEffectFreeFor(...)
     for(Select(Ident(id), func) <- tree; if (func.toString matches "size|length|head|last") && (id.toString == name)) used -= 1
     
     (used > 0)
@@ -53,7 +54,7 @@ class AbstractInterpretation(val global: Global, implicit val unit: GUnit) {
       val regex = reg.r
     } catch {
       case e: java.util.regex.PatternSyntaxException =>
-        warn(treePosHolder, "Regex pattern syntax warning: "+e.getDescription)
+        warn(treePosHolder, "Regex pattern syntax error: "+e.getDescription)
       case e: Exception =>
     }
   }
@@ -96,6 +97,7 @@ class AbstractInterpretation(val global: Global, implicit val unit: GUnit) {
     //def forall(func: Int => Boolean) = (values forall func) && (ranges forall { case (low, high) => (low to high) forall func })
     def existsLower(i: Int): Boolean = (values exists { _ < i }) || (ranges exists { case (low, high) => low < i })
     def existsGreater(i: Int): Boolean = (values exists { _ > i }) || (ranges exists { case (low, high) => high > i })
+    def forallLower(i: Int): Boolean = (values forall { _ < i }) && (ranges forall { case (low, high) => (low <= high) && (high < i) })
     def forallEquals(i: Int): Boolean = (values forall { _ == i }) && (ranges forall { case (low, high) => (low == high) && (i == low) })
     
     def addRange(low: Int, high: Int): Values = new Values(ranges + (if(low > high) (high, low) else (low, high)), values, conditions, name, false, -1)
@@ -822,7 +824,7 @@ class AbstractInterpretation(val global: Global, implicit val unit: GUnit) {
 
     pushDefinitions()
     
-    val (param, values, body, func) = tree match {
+    val (param, values, body, func, collection) = tree match {
       case Apply(TypeApply(Select(collection, func), _), List(Function(List(ValDef(_, param, _, _)), body))) if (func.toString matches funcs) =>
         //println(showRaw(collection))
         val values = computeExpr(collection).addName(param.toString)
@@ -832,17 +834,20 @@ class AbstractInterpretation(val global: Global, implicit val unit: GUnit) {
             //return
         //}
         
-        (param.toString, values, body, func.toString)
+        (param.toString, values, body, func.toString, collection)
       case _ => 
         //println("not a loop("+tree.pos+"): "+showRaw(tree))
         return
     }
     
     if(values.nonEmpty) {
-      values.notSeq
-      vals += param -> values
+      vals += param -> values.notSeq
       
-      if(!isUsed(body, param) && func != "foreach") warn(tree, "Iterator value is not used in the body.")
+      val exceptions =
+        (func == "foreach" ||
+        collection.tpe.toString.startsWith("scala.collection.immutable.Range"))
+      
+      if(!isUsed(body, param) && !exceptions) warn(tree, "Iterator value is not used in the body.")
 
       traverseBlock(body)
     }
@@ -861,14 +866,25 @@ class AbstractInterpretation(val global: Global, implicit val unit: GUnit) {
     // scalastyle:off magic.number
     def toStringAttrs(param: Tree): StringAttrs = {
       val intParam = computeExpr(param)
-      if(intParam.isValue) new StringAttrs(Some(intParam.getValue.toString))
-      else if(param.tpe.widen <:< definitions.IntClass.tpe) new StringAttrs(minLength = 1, trimmedMinLength = 1, maxLength = 11, trimmedMaxLength = 11)
-      else if(param.tpe.widen <:< definitions.LongClass.tpe) new StringAttrs(minLength = 1, trimmedMinLength = 1, maxLength = 20, trimmedMaxLength = 20)
+      if(intParam.isValue) new StringAttrs(exactValue = Some(intParam.getValue.toString))
+      if(intParam.size > 1) {
+        val maxLen = math.max(intParam.max.toString.length, intParam.min.toString.length)
+        new StringAttrs(minLength = 1, trimmedMinLength = 1, maxLength = maxLen, trimmedMaxLength = maxLen)
+      } else if(param match { case Literal(Constant(a)) => true case _  => false }) param match { //groan.
+        case Literal(Constant(null)) => new StringAttrs(exactValue = Some("null"))
+        case Literal(Constant(a))    => new StringAttrs(Some(a.toString))
+      } else if(param.tpe.widen <:< definitions.CharClass.tpe)  new StringAttrs(minLength = 1, trimmedMinLength = 0, maxLength = 1, trimmedMaxLength = 0)
+      else if(param.tpe.widen <:< definitions.ByteClass.tpe)    new StringAttrs(minLength = 1, trimmedMinLength = 1, maxLength = 4, trimmedMaxLength = 4)
+      else if(param.tpe.widen <:< definitions.ShortClass.tpe)   new StringAttrs(minLength = 1, trimmedMinLength = 1, maxLength = 6, trimmedMaxLength = 6)
+      else if(param.tpe.widen <:< definitions.IntClass.tpe)     new StringAttrs(minLength = 1, trimmedMinLength = 1, maxLength = 11, trimmedMaxLength = 11)
+      else if(param.tpe.widen <:< definitions.LongClass.tpe)    new StringAttrs(minLength = 1, trimmedMinLength = 1, maxLength = 20, trimmedMaxLength = 20)
       //http://stackoverflow.com/questions/1701055/what-is-the-maximum-length-in-chars-needed-to-represent-any-double-value :)
-      else if(param.tpe.widen <:< definitions.DoubleClass.tpe) new StringAttrs(minLength = 1, trimmedMinLength = 1, maxLength = 1079, trimmedMaxLength = 1079)
-      else if(param.tpe.widen <:< definitions.FloatClass.tpe) new StringAttrs(minLength = 1, trimmedMinLength = 1, maxLength = 154, trimmedMaxLength = 154)
+      else if(param.tpe.widen <:< definitions.DoubleClass.tpe)  new StringAttrs(minLength = 1, trimmedMinLength = 1, maxLength = 1079, trimmedMaxLength = 1079)
+      else if(param.tpe.widen <:< definitions.FloatClass.tpe)   new StringAttrs(minLength = 1, trimmedMinLength = 1, maxLength = 154, trimmedMaxLength = 154)
+      else if(param.tpe.widen <:< definitions.BooleanClass.tpe) new StringAttrs(minLength = 4, trimmedMinLength = 4, maxLength = 5, trimmedMaxLength = 5)
       else {
         //TODO: not sure if this is the right way, but <:< definitions.TraversableClass.tpe does not work directly
+        // also, it's possible to have a Traversable, which has a shorter toString - check if you're in scala. or Predef
         if((param.tpe.baseClasses.exists(_.tpe =:= definitions.TraversableClass.tpe)) && !(param.tpe.widen <:< definitions.StringClass.tpe)) {
           // collections: minimal is Nil or Type()
           //TODO: Surely I can do moar... intParam.isSeq, etc
@@ -918,10 +934,10 @@ class AbstractInterpretation(val global: Global, implicit val unit: GUnit) {
           )
         case "toString" if params.size == 0 =>
           Left(toStringAttrs(string))
-        case "$plus" if params.size == 1 =>
+        case ("$plus"|"concat") if params.size == 1 =>
           Left(str + toStringAttrs(params.head))
-        case "$times" if intParam.isValue =>
-          Left(str * intParam.getValue)
+        case "$times" =>
+          Left(str * intParam)
 
         case f @ ("init"|"tail") => 
           if(str.exactValue.isDefined) {
@@ -985,6 +1001,22 @@ class AbstractInterpretation(val global: Global, implicit val unit: GUnit) {
               Left(empty)
           }
         //str.func(Int)
+        case f @ ("toDouble"|"toFloat") if str.exactValue.isDefined =>
+          try {
+            str.exactValue.get.toDouble
+          } catch {
+            case e: Exception =>
+              warn(treePosHolder, "This String "+f+" conversion will likely fail.")
+          }
+          Left(empty)
+        case f @ ("toLong") if str.exactValue.isDefined =>
+          try {
+            str.exactValue.get.toLong
+          } catch {
+            case e: Exception =>
+              warn(treePosHolder, "This String "+f+" conversion will likely fail.")
+          }
+          Left(empty)
         case f @ ("charAt"|"codePointAt"|"codePointBefore"|"substring"
                  |"apply"|"drop"|"take"|"dropRight"|"takeRight") if intParam.isValue =>
           val param = intParam.getValue
@@ -1146,7 +1178,8 @@ class AbstractInterpretation(val global: Global, implicit val unit: GUnit) {
         case Apply(augmentString, List(expr)) if(augmentString.toString == "scala.this.Predef.augmentString") =>
           StringAttrs(expr)
           
-        case Apply(Select(expr1, op), List(expr2)) if (op == nme.ADD) && (expr1.tpe.widen <:< definitions.StringClass.tpe ^ expr2.tpe.widen <:< definitions.StringClass.tpe) =>
+        // Implicit toString
+        case Apply(Select(expr1, nme.ADD), List(expr2)) if (expr1.tpe.widen <:< definitions.StringClass.tpe ^ expr2.tpe.widen <:< definitions.StringClass.tpe) =>
           toStringAttrs(expr1) + toStringAttrs(expr2)
 
         /// Pass on functions on strings
@@ -1203,9 +1236,33 @@ class AbstractInterpretation(val global: Global, implicit val unit: GUnit) {
         maxLength = if(this.getMaxLength == Int.MaxValue || s.getMaxLength == Int.MaxValue) Int.MaxValue else this.getMaxLength + s.getMaxLength,
         trimmedMaxLength = if(this.getTrimmedMaxLength == Int.MaxValue || s.getTrimmedMaxLength == Int.MaxValue) Int.MaxValue else this.getTrimmedMaxLength + s.getTrimmedMaxLength
       )
+    def *(n: Values): StringAttrs = {
+      if(n.isValue) {
+        this * n.getValue
+      } else if(n.nonEmpty) {
+        if(n forallLower 2) {
+          if(n.max == 1) {
+            new StringAttrs(
+              minLength = 0,
+              trimmedMinLength = 0,
+              maxLength = this.getMaxLength,
+              trimmedMaxLength = this.getTrimmedMaxLength)
+          } else {
+            warn(treePosHolder, "Multiplying a string with a value <= 0 will result in an empty string.")
+            new StringAttrs(exactValue = Some(""))
+          }
+        } else {
+          new StringAttrs(
+            minLength = if(n.min > 0) this.getMinLength*n.min else 0,
+            trimmedMinLength = if(n.min > 0) this.getTrimmedMinLength*n.min else 0)
+        }
+      } else {
+        StringAttrs.empty
+      }
+    }
     def *(n: Int): StringAttrs = 
       if(n <= 0) {
-        warn(treePosHolder, "Multiplying a string with a value <= 0 will always result in an empty string.")
+        warn(treePosHolder, "Multiplying a string with a value <= 0 will result in an empty string.")
         new StringAttrs(Some(""))
       } else {
         new StringAttrs(
@@ -1219,7 +1276,7 @@ class AbstractInterpretation(val global: Global, implicit val unit: GUnit) {
     override def hashCode: Int = exactValue.hashCode + name.hashCode + minLength + trimmedMinLength + maxLength + trimmedMaxLength
     override def equals(that: Any): Boolean = that match {
       case s: StringAttrs => (this.exactValue.isDefined && s.exactValue.isDefined && this.exactValue.get == s.exactValue.get)
-      case s: String => exactValue.exists(_ == s)
+      case s: String => this.exactValue.exists(_ == s)
       case _ => false
     }
     
@@ -1402,7 +1459,11 @@ class AbstractInterpretation(val global: Global, implicit val unit: GUnit) {
         
         val returnVal = last match {
           case Return(ret) => 
-            warn(last, "Scala has implicit return, you don't need a return statement at the end of a method")
+            def otherReturns: Boolean = { 
+              for(Return(ret) <- b) return true
+              false
+            }
+            if(otherReturns) warn(last, "Scala has implicit return, you don't need a return statement at the end of a method")
             ret
           case a => 
             a
@@ -1448,14 +1509,6 @@ class AbstractInterpretation(val global: Global, implicit val unit: GUnit) {
         treePosHolder = regExpr
                 
         StringAttrs(regExpr).exactValue.foreach(checkRegex)
-
-      /// Option checks
-      /// Checks for Option[Traversable[A]].size, which is probably a bug (use .isDefined instead)
-      case t @ Select(Apply(option2Iterable, List(opt)), size)
-        if (option2Iterable.toString contains "Option.option2Iterable") && size.toString == "size" 
-        && opt.tpe.widen.typeArgs.exists(tp => tp.widen <:< definitions.StringClass.tpe || tp.widen.baseClasses.exists(_.tpe =:= definitions.TraversableClass.tpe)) =>
-
-        warn(t, "Did you mean to take the size of the collection inside the Option?")
         
       ///Checking the .size (there's a separate warning about using .size)
       //ADD: Generalize... move to applyCond completely, make it less hacky

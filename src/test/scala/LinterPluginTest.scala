@@ -245,6 +245,16 @@ class LinterPluginTest extends JUnitMustMatchers with StandardMatchResults {
         case _ => println("how low")
       }""")
     shouldnt("""
+      val a = 7
+      a match { 
+        case 3 => println("hello") 
+        case 4 if util.Random.nextBoolean => println("hello") 
+        case 5 if util.Random.nextBoolean => println("hello") 
+        case 5 if util.Random.nextBoolean => println("hello") 
+        case 6 => println("hello") 
+        case _ => println("how low") 
+      }""")
+    shouldnt("""
       import scala.concurrent._
       import ExecutionContext.Implicits.global
       import scala.util.{Failure,Success}
@@ -341,17 +351,26 @@ class LinterPluginTest extends JUnitMustMatchers with StandardMatchResults {
   }
 
   @Test
-  def def__redundantParameters() {
+  def def__unusedParameters() {
     implicit val msg = "not used in method"
     
     should("""def func(a:Int, b:Int) = { val c = a+1; c } """)
     should("""def func(a:Int)(implicit b:Int) = { val c = b+1; b }""")
-    
+
     shouldnt("""def func(a:Int)(implicit b:Int) = a""")
     shouldnt("""def func(a:Int) = a""")
     shouldnt("""def func(a:Int) = {}""")
     shouldnt("""def func(a:Int) {}""")
     shouldnt("""def func(a:Int) = ???""")
+
+    should("""
+      trait A { def a(b:Int): Traversable[Int] }
+      trait C { def a(b: Int): List[Int] = { println; Nil } }
+    """)
+    shouldnt("""
+      trait A { def a(b:Int): Traversable[Int] }
+      trait C extends A { def a(b: Int): List[Int] = { println; Nil } }
+    """)
   }
 
   @Test
@@ -883,6 +902,7 @@ class LinterPluginTest extends JUnitMustMatchers with StandardMatchResults {
   }
   
   @Test
+  @Ignore
   def probableBugs__sameExpression() {
     implicit val msg = /*Same value/expression */"on both sides"
 
@@ -936,6 +956,10 @@ class LinterPluginTest extends JUnitMustMatchers with StandardMatchResults {
       var a = util.Random.nextInt
       if(a == 5) "foo"
     """)
+    shouldnt("""
+      var a = util.Random.nextInt
+      if(5 < a && a <= 10) "foo"
+    """)
   }
   
   
@@ -978,7 +1002,7 @@ class LinterPluginTest extends JUnitMustMatchers with StandardMatchResults {
 
   @Test
   def if__mergeInner() {
-    implicit val msg = "These two ifs can be merged"
+    implicit val msg = "These two nested ifs can be merged"
     
     should("""
       val a,b = 4
@@ -1083,11 +1107,14 @@ class LinterPluginTest extends JUnitMustMatchers with StandardMatchResults {
     
     should("""{ var a = List(if(3 == 3) throw new Exception() else throw new Error()); println(a) }""")
     shouldnt("""{ var a:List[Nothing] = List(if(3 == 3) throw new Exception() else throw new Error()); println(a) }""")
+
+    should("""{ var a = List(1, "2") }""")
+    shouldnt("""{ var a = List[Any](1, "2") }""")
   }
   
   @Test
   def possibleBugs__assignment() {
-    implicit val msg = "unused value before"//"Assignment right after declaration"
+    implicit val msg = "unused value before"
     
     should("""
       var a = 6L
@@ -1111,7 +1138,7 @@ class LinterPluginTest extends JUnitMustMatchers with StandardMatchResults {
 
   @Test
   def possibleBugs__assignment2() {
-    implicit val msg = "unused value before"//"Two subsequent assigns"
+    implicit val msg = "unused value before"
     
     should("""
       var a = 6L
@@ -1276,8 +1303,8 @@ class LinterPluginTest extends JUnitMustMatchers with StandardMatchResults {
   }
   
   @Test
-  def numeric__BigDecimalFromFloat() {
-    implicit val msg = "use a string constant"
+  def numeric__BigDecimal() {
+    implicit val msg = "Possible loss of precision"
     
     should("""BigDecimal(0.55555555555555555555555555555)""")
     should("""new java.math.BigDecimal(0.1)""")
@@ -1289,12 +1316,23 @@ class LinterPluginTest extends JUnitMustMatchers with StandardMatchResults {
          -0.12345678901234567890
       )
     """)
+    should("""BigDecimal.valueOf(0.555555555555555555f)""")
+    shouldnt("""BigDecimal.valueOf("0.555555555555555555")""")
+
+    should("""BigDecimal(0.5555555555555555555555555555555555555555555555555555555555555)""")
+    should("""BigDecimal(-0.5555555555555555555555555555555555555555555555555555555555555)""")
+    should("""BigDecimal("1.333333333333333333333333333333333333333333333e223")""")
+    should("""BigDecimal("1.33333333333333333333333333", new java.math.MathContext(5))""")
+    should("""BigDecimal("-1.33333333333333333333333333", new java.math.MathContext(5))""")
+    shouldnt("""BigDecimal("1.33333333333333333333333333", new java.math.MathContext(50))""")
     
     shouldnt("""BigDecimal(0.1)""")
     shouldnt("""BigDecimal("0.1")""")
     shouldnt("""new java.math.BigDecimal("0.1")""")
     shouldnt("""BigDecimal.valueOf("0.1")""")
     shouldnt("""math.BigDecimal.valueOf("0.1")""")
+    
+    should("""BigDecimal("afdsfsdafd")""")("""NumberFormatException""")
   }
 
   @Test
@@ -1342,7 +1380,7 @@ class LinterPluginTest extends JUnitMustMatchers with StandardMatchResults {
 
   @Test
   def style__find_isDefined_to_exists() {
-    implicit val msg = "Use exists(...) instead of find(...).isDefined"
+    implicit var msg = "Use exists(...) instead of find(...)."
     
     should("""List(1,2,3).find(_ == 2).isDefined""")
     should("""Set(1,2,3).find(_ == 2).isDefined""")
@@ -1350,8 +1388,22 @@ class LinterPluginTest extends JUnitMustMatchers with StandardMatchResults {
     should("""Array(1,2,3).find(_ == 2).isDefined""")
     should("""def a(x:Int) = x == 2; List(1,2,3).find(a).isDefined""")
 
+    should("""List(1,2,3).find(_ == 2).isEmpty""")
+    should("""Set(1,2,3).find(_ == 2).isEmpty""")
+
     shouldnt("""List(1,2,3).headOption.isDefined""")
     shouldnt("""List(1,2,3).exists(_ == 2)""")
+
+    shouldnt("""List(1,2,3).headOption.isEmpty""")
+    shouldnt("""List(1,2,3).exists(_ == 2)""")
+
+    msg = "Use exists(...) instead of filter(...)."
+    
+    should("""List(1,2,3).filter(_ == 2).isEmpty""")
+    should("""Set(1,2,3).filter(_ == 2).isEmpty""")
+    should("""collection.mutable.HashSet(1,2,3).filter(_ == 2).isEmpty""")
+    //should("""Array(1,2,3).filter(_ == 2).isEmpty""") gets wrapped probably... don't care
+    should("""def a(x:Int) = x == 2; List(1,2,3).filter(a).isEmpty""")
   }
 
   @Test
@@ -1364,6 +1416,35 @@ class LinterPluginTest extends JUnitMustMatchers with StandardMatchResults {
     shouldnt(""" List(1,2,3).flatMap(x => if(x == 2) Some(x+1) else None) """)
     shouldnt(""" List(1,2,3).flatMap(x => if(x == 2) Nil else List(x+1)) """)
   }
+  
+  @Test
+  def style__if_to_optstuff() {
+    implicit val msg = " instead of if" //use getOrElse, orNull, ... instead of if
+    
+    should("""val a = Option("str"); if(a.isDefined) a.get else null""")
+    should("""val a = Option("str"); if(!a.isDefined) null else a.get""")
+    should("""val a = Option("str"); if(a.isEmpty) null else a.get""")
+    should("""val a = Option("str"); if(!a.isEmpty) a.get else null""")
+    should("""val a = Option("str"); if(a != None) a.get else null""")
+    should("""val a = Option("str"); if(a == None) null else a.get""")
+    
+    // different value
+    shouldnt("""val a = Option("str"); if(a.isDefined) a.get+1 else null""")
+    shouldnt("""val a = Option("str"); if(!a.isDefined) null else a.get+1""")
+    shouldnt("""val a = Option("str"); if(a.isEmpty) null else a.get+1""")
+    shouldnt("""val a = Option("str"); if(!a.isEmpty) a.get+1 else null""")
+    shouldnt("""val a = Option("str"); if(a != None) a.get+1 else null""")
+    shouldnt("""val a = Option("str"); if(a == None) null else a.get+1""")
+    
+    // switcheroo
+    shouldnt("""val a = Option("str"); if(a.isDefined) null else a.get""")
+    shouldnt("""val a = Option("str"); if(!a.isDefined) a.get else null""")
+    shouldnt("""val a = Option("str"); if(a.isEmpty) a.get else null""")
+    shouldnt("""val a = Option("str"); if(!a.isEmpty) null else a.get""")
+    shouldnt("""val a = Option("str"); if(a != None) null else a.get""")
+    shouldnt("""val a = Option("str"); if(a == None) a.get else null""")    
+  }
+
 
   @Test
   def numeric__badAbs() {
@@ -1453,6 +1534,91 @@ class LinterPluginTest extends JUnitMustMatchers with StandardMatchResults {
     shouldnt("""var a = new util.Random; a.nextInt(1)""")("""The parameter of this nextInt might be lower than 1 here.""")
   }
     
+  @Test
+  def map__apply() {
+    implicit val msg = "This key has already been defined"
+    
+    should(""" val a = 5; Map(a -> 5, 2 -> 4, a -> 2) """)
+    should(""" val a = 5; collection.mutable.HashMap(a -> 5, 2 -> 4, a -> 2) """)
+    should(""" val a = 5; Map((a,5), 2 -> 4, a -> 2) """)
+
+    shouldnt(""" Map(1 -> 2, 2 -> 3, 3 -> 4) """)
+    shouldnt(""" val a = 5; Map(a -> 5, 2 -> 4, (a+1) -> 2) """)
+    shouldnt(""" val a = 5; collection.mutable.HashMap(a -> 5, 2 -> 4, (a-1) -> 2) """)
+  }
+
+  @Test
+  def list__isEmpty() {
+    implicit val msg = "instead of comparing to size"//slow for lists, etc
+    
+    should(""" val a = List(1,2,3); if(a.size > 0) "" """)
+    should(""" val a = List(1,2,3); if(a.size == 0) "" """)
+    should(""" val a = List(1,2,3); if(a.size != 0) "" """)
+
+    shouldnt(""" val a = List(1,2,3); if(a.size > 1) "" """)
+    shouldnt(""" val a = List(1,2,3); if(a.size == 1) "" """)
+    shouldnt(""" val a = List(1,2,3); if(a.size != 1) "" """)
+    shouldnt(""" val a = List(1,2,3); if(a.isEmpty) "" """)
+    shouldnt(""" val a = List(1,2,3); if(a.nonEmpty) "" """)
+  }
+
+  @Test
+  def puzzlers__001() {
+    implicit val msg = "You're passing a block that returns a function"
+    
+    should("""List(1, 2).map { println("Hi"); _ + 1 }""")
+    shouldnt("""List(1, 2).map { i => println("Hi"); i + 1 }""")
+  }
+
+  @Test
+  def numeric__IntDivIntoFloatVar() {
+    implicit val msg = "Integer division detected in an expression assigned to a floating point variable."
+    
+    should("""var a = 5; var b = 5f; println("Ignoring some other warning here... "+b); b = 1/a""")
+    shouldnt("""var a = 5; var b = 5f; println("Ignoring some other warning here... "+b); b = 1/a.toFloat""")
+    should("""var a = 5; var b: Float = 1/a""")
+    shouldnt("""var a = 5; var b = 1/a""")
+    shouldnt("""var a = 5; var b = 1/a.toFloat""")
+    should("""var a = 5; var b = 1f + 1/a + 1f""")
+    shouldnt("""var a = 5; var b = 1f + 1/a.toDouble + 1f""")
+  }
+
+
+  @Test
+  def readmeExamples() {
+    val defs = """
+    
+      val a,b,x,y = util.Random.nextInt
+      val bool = util.Random.nextBoolean
+      val str = util.Random.nextString(5)
+      val strOption = Option(str)
+      
+    """
+  
+    should(defs+"""if(a == 10 || b == 10) 0 else if(a == 20 && b == 10) 1 else 2""")("""This condition has appeared earlier in the if-else chain, and will never hold here.""")
+    should(defs+"""if(b > 4) (2,a) else (2,a)""")("""If statement branches have the same structure.""")
+    should(defs+"""if(a == b) true else false""")("""Remove the if and just use the condition.""")
+    should(defs+"""(x,y) match { case (a,5) if a > 5 => 0 case (c,5) if c > 5 => 1 }""")("""Identical case detected above - this will never match.""")
+    should(defs+"""a match { case 3 => "hello" case 4 => "hello" case 5 => "hello" case _ => "how low" }""")("""3 neighbouring cases are identical, and could be merged.""")
+    should(defs+"""bool match { case true => 0 case false => 1 }""")("""This is probably better written as an if statement.""")
+    should(defs+"""for(i <- 10 to 20) { if(i > 20) "" }""")("""This condition will never hold.""")
+    should(defs+"""for(i <- 1 to 10) { 1/(i-1)  }""")("""You will likely divide by zero here.""")
+    should(defs+"""{ val a = List(1,2,3); for(i <- 1 to 10) { println(a(i)) } }""")("""You will likely use a too large index for a collection here.""")
+    should(defs+"""for(i <- 10 to 20) { if(i.toString.length == 3) "" }""")("""This condition will never hold.""")
+    should(defs+"""str.replaceAll("?", ".")""")("""Regex pattern syntax error: Dangling meta character '?'""")
+    should(defs+"""math.log(1d + a)""")("""Use math.log1p(x) instead of math.log(1 + x) for added accuracy when x is near 0""")
+    should(defs+"""BigDecimal(0.555555555555555555555555555)""")("""Possible loss of precision - use a string constant""")
+    should(defs+"""{val a = Some(List(1,2,3)); if(a.size > 3) ""}""")("""Did you mean to take the size of the collection inside the Option?""")
+    should(defs+"""if(strOption.isDefined) strOption.get else """"")("""Use opt.getOrElse(...) instead of if(opt.isDefined) opt.get else ...""")
+    should(defs+"""List(1,2,3,4).find(x => x % 2 == 0).isDefined""")("""Use exists(...) instead of find(...).isDefined""")
+    should(defs+"""List(1,2,3,4).flatMap(x => if(x % 2 == 0) List(x) else Nil)""")("""Use filter(x => condition) instead of flatMap(x => if(condition) ... else ...)""")
+    should(defs+"""def func(b: Int, c: String, d: String) = { println(b); b+c }""")("""Parameter d is not used in method func""")
+    //should(defs+"""List(1, 2, 3).contains("4")""")("""List[Int].contains(String) will probably return false.""")
+    //should(defs+"""Nil == None""")("""Comparing with == on instances of different types (object Nil, object None) will probably return false.""")
+    should(defs+"""List(1, 2, 3).contains("4")""")(""" will probably return false.""")
+    should(defs+"""Nil == None""")(""" will probably return false.""")
+  }
+
   //stuff that doesn't work and I don't know why
   @Test 
   def broken() {

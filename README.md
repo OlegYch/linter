@@ -9,6 +9,9 @@ But it is usable (and useful), and all forms of feedback are very welcome.
 To see it in action, try it out on your code or run `sbt console` in its folder.
 
 ## Usage
+
+__Note:__ If you have instructions for another build tool or IDE, or better instructions for current ones, please make a pull request.
+
 ### From sbt
 Add it as a compiler plugin to your project by editing your build.sbt file:
 
@@ -20,7 +23,7 @@ Add it as a compiler plugin to your project by editing your build.sbt file:
 You can download the latest jars here:
 [Scala 2.10.2](https://github.com/HairyFotr/linteRepo/blob/gh-pages/releases/com/foursquare/lint/linter_2.10/0.1-SNAPSHOT/linter_2.10-0.1-SNAPSHOT.jar?raw=true), 
 [Scala 2.9.3](https://github.com/HairyFotr/linteRepo/blob/gh-pages/releases/com/foursquare/lint/linter_2.9.3/0.1-SNAPSHOT/linter_2.9.3-0.1-SNAPSHOT.jar?raw=true),
-[Scala 2.11.0-M3](https://github.com/HairyFotr/linteRepo/blob/gh-pages/releases/com/foursquare/lint/linter_2.11/0.1-SNAPSHOT/linter_2.11-0.1-SNAPSHOT.jar?raw=true) (experimental), 
+[Scala 2.11.0-M4](https://github.com/HairyFotr/linteRepo/blob/gh-pages/releases/com/foursquare/lint/linter_2.11/0.1-SNAPSHOT/linter_2.11-0.1-SNAPSHOT.jar?raw=true) (experimental), 
 
     terminal:
       scalac -Xplugin:<path-to-linter-jar>.jar ...
@@ -34,7 +37,6 @@ You can download the latest jars here:
           <arg>-Xplugin:<path-to-linter-jar>.jar</arg>
         </args>
       </configuration>
-    (if you use maven, please make a pull request with a more proper maven way)
 
 ## Currently supported warnings
 
@@ -45,7 +47,7 @@ You can also check the [test code](https://github.com/HairyFotr/linter/blob/mast
 ### If checks
 #### Repeated condition in an else-if chain
     scala> if(a == 10 || b == 10) 0 else if(a == 20 && b == 10) 1 else 2
-    <console>:10: warning: This condition has appeared earlier in the else-if chain, and will never hold here.
+    <console>:10: warning: This condition has appeared earlier in the if-else chain, and will never hold here.
                   if(a == 10 || b == 10) 0 else if(a == 20 && b == 10) 1 else 2
                                                                 ^
 
@@ -106,13 +108,13 @@ You can also check the [test code](https://github.com/HairyFotr/linter/blob/mast
 
 #### Regex syntax warnings
     scala> str.replaceAll("?", ".")
-    <console>:9: warning: Regex pattern syntax warning: Dangling meta character '?'
+    <console>:9: warning: Regex pattern syntax error: Dangling meta character '?'
                   str.replaceAll("?", ".")
                                  ^
 ### Numeric checks
 #### Using `log(1 + a)` instead of `log1p(a)`
-    scala> math.log(1 + a)
-    <console>:9: warning: Use math.log1p(x) instead of math.log(1 + x) for added accuracy (if x is near 0
+    scala> math.log(1d + a)
+    <console>:9: warning: Use math.log1p(x) instead of math.log(1 + x) for added accuracy when x is near 0
                   math.log(1 + a)
                           ^
 
@@ -150,9 +152,9 @@ You can also check the [test code](https://github.com/HairyFotr/linter/blob/mast
 
 ### Various possible bugs
 #### Unused method parameters
-    scala> def func(b: Int, c: String, d: String) = b+c
+    scala> def func(b: Int, c: String, d: String) = { println(b); b+c }
     <console>:7: warning: Parameter d is not used in method func
-           def func(b: Int, c: String, d: String) = b+c
+           def func(b: Int, c: String, d: String) = { println(b); b+c }
                ^
 
 #### Unsafe `contains`
@@ -166,14 +168,14 @@ You can also check the [test code](https://github.com/HairyFotr/linter/blob/mast
                   Nil == None
                       ^
 
-
 ## Future Work
 
 * Add more checks
 * Add more tests, report false positives
-* Pick and choose which warnings you want
+* Pick and choose which warnings you want (configuration)
 * Choose whether they should be warnings or errors
 * Improve testing (larger samples, generated tests, ...)
+* Drop Scala 2.9 and check out new stuff such as quasiquotes
 
 ### Ideas for new warnings
 
@@ -191,6 +193,7 @@ Rule lists from other static analysis tools for inspiration:
 * ScalaStyle - https://github.com/scalastyle/scalastyle/wiki
 * CheckStyle(Java) - http://checkstyle.sourceforge.net/availablechecks.html
 * PMD(Java) - http://pmd.sourceforge.net/pmd-5.0.3/rules/index.html
+* CodeNarc(Groovy) - http://codenarc.sourceforge.net/codenarc-rule-index.html
 * PVS-Studio(C++) - http://www.viva64.com/en/d/
 * Coverity(C++) - http://www.slideshare.net/Coverity/static-analysis-primer-22874326 (6,7)
  

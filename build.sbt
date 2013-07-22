@@ -19,9 +19,7 @@ name := "linter"
 
 organization := "com.foursquare.lint"
 
-version := "0.1.1-SNAPSHOT"
-
-crossScalaVersions <<= scalaVersion { scalaVersion => Seq("2.9.2", "2.9.3", "2.10.1", "2.11.0-M3") }
+crossScalaVersions <<= scalaVersion { scalaVersion => Seq("2.9.2", "2.9.3", "2.10.2", "2.11.0-M4") }
 
 publishTo := Some(Resolver.file("file",  new File( "../linteRepo/releases" )) )
 
